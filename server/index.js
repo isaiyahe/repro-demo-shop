@@ -27,9 +27,10 @@ app.post("/api/cart", (req, res) => {
 });
 
 app.post("/api/session/guest", (req, res) => {
-  // THE SEEDED BUG: guest sessions never get a customer record.
-  // Registered users would land in state.customer; guests stay null.
-  state.guestEmail = req.body?.email ?? null;
+  // Fix: set a minimal customer object for guest sessions with an id.
+  const email = req.body?.email ?? null;
+  state.guestEmail = email;
+  state.customer = email ? { id: `guest_${Date.now()}`, email } : null;
   res.json({ ok: true, guest: true });
 });
 
