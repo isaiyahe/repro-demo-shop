@@ -13,7 +13,8 @@ function freshState() {
   return { cart: [], customer: null, orders: [] };
 }
 
-app.get("/api/state", (_req, res) => res.json(state));
+const bootedAt = new Date().toISOString();
+app.get("/api/state", (_req, res) => res.json({ ...state, bootedAt }));
 
 app.post("/api/reset", (_req, res) => {
   state = freshState();
@@ -27,9 +28,14 @@ app.post("/api/cart", (req, res) => {
 });
 
 app.post("/api/session/guest", (req, res) => {
-  // THE SEEDED BUG: guest sessions never get a customer record.
-  // Registered users would land in state.customer; guests stay null.
-  state.guestEmail = req.body?.email ?? null;
+  // Fix: create a customer record for guest sessions
+  const email = req.body?.email ?? null;
+  if (email) {
+    state.customer = { id: `guest_${Date.now()}`, email };
+  } else {
+    state.customer = null;
+  }
+  state.guestEmail = email;
   res.json({ ok: true, guest: true });
 });
 
