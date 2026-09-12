@@ -5,24 +5,55 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "..", "public")));
+app.use(express.static(path.join(__dirname, "..", "public"), { index: false }));
 
-// In-memory demo state. Reset with POST /api/reset.
-let state = freshState();
+const CATALOG = [
+  { sku: "demo-item", name: "Demo item", price: 19, blurb: "One of these is all it takes to reach checkout.", tint: "#e9efe9" },
+  { sku: "field-notebook", name: "Field notebook", price: 12, blurb: "Dot grid, 96 pages, lies flat.", tint: "#efe9e2" },
+  { sku: "enamel-mug", name: "Enamel mug", price: 16, blurb: "Camp classic. Dishwasher safe.", tint: "#e6ecf1" },
+  { sku: "wool-beanie", name: "Wool beanie", price: 24, blurb: "Merino, one size, three colors.", tint: "#f0e8ec" },
+];
+
+// Demo state. Persisted to state.json so a restart (e.g. after REPRO applies a fix)
+// keeps the cart the user built. Reset with POST /api/reset (session only) or /api/reset?all=1.
+import fs from "node:fs";
+const STATE_FILE = path.join(__dirname, "state.json");
 function freshState() {
   return { cart: [], customer: null, orders: [] };
 }
+function loadState() {
+  try { return { ...freshState(), ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) }; } catch { return freshState(); }
+}
+function saveState() {
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch {}
+}
+let state = loadState();
+app.use((_req, res, next) => { res.on("finish", saveState); next(); });
 
-app.get("/api/state", (_req, res) => res.json(state));
+const bootedAt = new Date().toISOString();
+app.get("/api/state", (_req, res) => res.json({ ...state, bootedAt }));
 
-app.post("/api/reset", (_req, res) => {
-  state = freshState();
-  res.json({ ok: true });
+app.get("/api/catalog", (_req, res) => res.json(CATALOG));
+
+// Default reset clears the session (customer, guest, orders) but keeps the cart,
+// so REPRO can replay the checkout steps against the same cart. ?all=1 clears everything.
+app.post("/api/reset", (req, res) => {
+  const cart = req.query.all ? [] : state.cart;
+  state = { ...freshState(), cart };
+  res.json({ ok: true, cart: state.cart });
 });
 
 app.post("/api/cart", (req, res) => {
-  const item = { sku: req.body?.sku ?? "demo-item", qty: 1, price: 19 };
-  state.cart.push(item);
+  const sku = req.body?.sku ?? "demo-item";
+  const product = CATALOG.find((p) => p.sku === sku) ?? CATALOG[0];
+  const existing = state.cart.find((i) => i.sku === product.sku);
+  if (existing) existing.qty += 1;
+  else state.cart.push({ sku: product.sku, name: product.name, qty: 1, price: product.price });
+  res.json({ ok: true, cart: state.cart });
+});
+
+app.delete("/api/cart/:sku", (req, res) => {
+  state.cart = state.cart.filter((i) => i.sku !== req.params.sku);
   res.json({ ok: true, cart: state.cart });
 });
 
@@ -46,14 +77,15 @@ app.post("/api/checkout", (_req, res) => {
 
 function createOrder(s) {
   if (s.cart.length === 0) throw new Error("Cart is empty");
-  // Deterministic failure for guest checkout: s.customer is null.
-  const customerId = s.customer.id; // TypeError: Cannot read properties of null (reading 'id')
+  // Fix: use guestEmail as customerId if customer is null (guest checkout)
+  const customerId = s.customer ? s.customer.id : s.guestEmail;
   return { id: `ord_${Date.now()}`, customerId, items: s.cart };
 }
 
+app.get("/", (_req, res) => res.sendFile(path.join(__dirname, "..", "public", "shop.html")));
 app.get("/checkout", (_req, res) =>
   res.sendFile(path.join(__dirname, "..", "public", "index.html")),
 );
 
 const port = process.env.PORT ?? 3000;
-app.listen(port, () => console.log(`demo shop on http://localhost:${port}/checkout`));
+app.listen(port, () => console.log(`demo shop on http://localhost:${port}/`));
