@@ -46,8 +46,8 @@ app.post("/api/checkout", (_req, res) => {
 
 function createOrder(s) {
   if (s.cart.length === 0) throw new Error("Cart is empty");
-  // Deterministic failure for guest checkout: s.customer is null.
-  const customerId = s.customer.id; // TypeError: Cannot read properties of null (reading 'id')
+  // Use guestEmail as customerId if customer is null for guest checkout
+  const customerId = s.customer ? s.customer.id : s.guestEmail;
   return { id: `ord_${Date.now()}`, customerId, items: s.cart };
 }
 
